@@ -101,7 +101,7 @@ for (const e of early) {
     ...entryLines(s.retest, f),
     `Стоп-лосс ${f(s.stop)}`,
     s.target && s.rr !== null ? `${s.rr.toFixed(1)}R до ${f(s.target.v)}` : "Цели рядом нет",
-    `Условий курса ${s.passed} из 7${s.missing.length ? `. Нет: ${s.missing.join(", ")}` : ""}`,
+    `Условий курса ${s.passed} из 9${s.missing.length ? `. Нет: ${s.missing.join(", ")}` : ""}`,
     `Данные: ${source}. Это не сигнал на вход, сверь график:`,
     `${SITE}?s=${e.sym}`,
   ].join("\n"));
