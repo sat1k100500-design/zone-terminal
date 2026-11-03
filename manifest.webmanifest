@@ -2,14 +2,12 @@
   "name": "Терминал зон",
   "short_name": "Зоны",
   "start_url": "./",
+  "scope": "./",
   "display": "standalone",
   "background_color": "#f5f5f7",
   "theme_color": "#f5f5f7",
   "icons": [
-    {
-      "src": "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 512 512'%3E%3Crect width='512' height='512' fill='%231d1d1f'/%3E%3Cpath d='M170 130v250M256 90v330M342 150v220' stroke='%23fff' stroke-width='14'/%3E%3Crect x='135' y='190' width='70' height='130' fill='%23fff'/%3E%3Crect x='221' y='140' width='70' height='210' fill='%23fff'/%3E%3Crect x='307' y='210' width='70' height='100' fill='%23fff'/%3E%3C/svg%3E",
-      "sizes": "any",
-      "type": "image/svg+xml"
-    }
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png" }
   ]
 }
