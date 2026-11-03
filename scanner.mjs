@@ -35,15 +35,14 @@ async function candles(api, sym, tf) {
   const rows = await json(`${api}/klines?symbol=${sym}&interval=${tf}&limit=${LOADS[tf]}`);
   return rows.map(x => ({ t: x[0] / 1000, o: +x[1], h: +x[2], l: +x[3], c: +x[4] }));
 }
-/* silent: сообщение придёт без звука. Со звуком идут только 🟣 и 🟢. */
-async function send(text, silent = false) {
-  if (!TOKEN || !CHAT) { console.log(`[без отправки${silent ? ", тихо" : ""}]\n` + text); return; }
+async function send(text) {
+  if (!TOKEN || !CHAT) { console.log("[без отправки]\n" + text); return; }
   let problem = "";
   for (let attempt = 1; attempt <= 4; attempt++) {
     try {
       const r = await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
         method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(20000),
-        body: JSON.stringify({ chat_id: CHAT, text, disable_web_page_preview: true, disable_notification: silent }),
+        body: JSON.stringify({ chat_id: CHAT, text, disable_web_page_preview: true }),
       });
       if (r.ok) return;
       problem = `ответ ${r.status}`;
@@ -60,9 +59,18 @@ function entryLines(r, f) {
   const out = [];
   if (r.ob) out.push(`Вход OB ${f(r.ob.open)}, 50% ${f(r.ob.mid)}`);
   if (r.fvg) out.push(`Вход FVG ${f(r.fvg.edge)}, 50% ${f(r.fvg.mid)}`);
-  if (r.touched) out.push("Цена уже заходила в зону");
   return out;
 }
+const sideName = side => side === "long" ? "лонг" : "шорт";
+const pdName = side => side === "long" ? "Discount" : "Premium";
+const inBand = (a, price) => price >= a.band[0] && price <= a.band[1];
+const planLines = (a, f) => [
+  `Стоп-лосс ${f(a.stop)}`,
+  `Тейк-профит 3R ${f(a.tp3)}`,
+  a.target && a.rr !== null ? `${a.rr.toFixed(1)}R до ${a.target.name} ${f(a.target.v)}` : "Цели рядом нет",
+];
+/* Облако запускается редко, поэтому свежим считается Shift за последние 6 свечей m15, а не 2, как на компьютере. */
+const FRESH = 6, RETURN = 40;
 
 const { api, source, list } = await coinList();
 if (TEST === "true") await send(`Проверка связи. Сканер работает, данные: ${source}.`);
@@ -70,7 +78,7 @@ if (TEST === "true") await send(`Проверка связи. Сканер ра�
 let seen = {};
 if (existsSync(STATE)) try { seen = JSON.parse(readFileSync(STATE, "utf8")); } catch (e) { seen = {}; }
 
-const hits = [], early = [], daily = [], retest = [];
+const hits = [], retest = [];
 let next = 0, failed = 0;
 await Promise.all(Array.from({ length: WORKERS }, async () => {
   while (next < list.length) {
@@ -79,84 +87,47 @@ await Promise.all(Array.from({ length: WORKERS }, async () => {
       const data = {};
       for (const tf of Object.keys(LOADS)) data[tf] = await candles(api, sym, tf);
       const m = buildModel(data, "15m", { lo: null, hi: null });
-      for (const x of m.setup.freshDaily) daily.push({ sym, x, price: m.price });
       for (const side of ["long", "short"]) {
-        const s = m.setup[side];
-        if (s.ok) hits.push({ sym, side, rr: s.rr, stop: s.stop, tp3: s.tp3, target: s.target.v, price: m.price, sweepT: s.sweep.t, retest: s.retest });
-        if (s.early) early.push({ sym, side, s, price: m.price });
-        if (s.watch) retest.push({ sym, side, s, price: m.price });
+        const a = m.setup[side].alert;
+        if (!a) continue;
+        if (a.age <= FRESH && inBand(a, m.price)) hits.push({ sym, side, a, price: m.price });
+        if (a.retest && a.age <= RETURN) retest.push({ sym, side, a, price: m.price });
       }
     } catch (e) { failed++; console.log(`${sym}: ${e.message}`); }
   }
 }));
-console.log(`Источник ${source}. Проверено ${list.length - failed} из ${list.length}, сетапов ${hits.length}, ранних сигналов ${early.length}, дневных свипов ${daily.length}, ждут возврата ${retest.length}.`);
+console.log(`Источник ${source}. Проверено ${list.length - failed} из ${list.length}, свежих Shift ${hits.length}, ждут возврата ${retest.length}.`);
 if (failed === list.length) throw new Error("Не удалось получить данные ни по одной монете");
 
 for (const w of retest) {
-  const { s } = w, dir = w.side === "long" ? 1 : -1, entry = s.retest.entry, gap = dir * (w.price - entry), risk = Math.abs(entry - s.stop);
-  const phase = gap <= 0 ? "zone" : gap <= risk * .5 ? "near" : null;
-  if (!phase || (s.target && dir * (w.price - s.target.v) >= 0)) continue;
-  const key = `retest:${w.sym}:${w.side}:${s.sweep.t}:${phase}`;
+  const { a } = w, dir = w.side === "long" ? 1 : -1;
+  if (dir * (w.price - a.entry) > 0 || !inBand(a, w.price) || (a.target && dir * (w.price - a.target.v) >= 0) || dir * (w.price - a.stop) <= 0) continue;
+  const key = `poi:${w.sym}:${w.side}:${a.shift.t}`;
   if (seen[key]) continue;
-  const f = v => fmt(v, w.price);
+  const f = v => fmt(v, w.price), poi = a.pois.find(z => w.price >= z.lo && w.price <= z.hi);
   await send([
-    `🟣 ${w.sym}: цена ${phase === "zone" ? "В ЗОНЕ" : "подходит к зоне"} ${s.retest.name}, ${w.side === "long" ? "лонг" : "шорт"}`,
-    `Цена ${f(w.price)}`,
-    ...entryLines(s.retest, f),
-    `Стоп-лосс ${f(s.stop)}`,
-    `Тейк-профит 3R ${f(s.tp3)}`,
-    s.target && s.rr !== null ? `${s.rr.toFixed(1)}R до ${f(s.target.v)}` : "Цели рядом нет",
+    `🟣 ${w.sym}: возврат в зону ${a.retest.name}, ${sideName(w.side)}`,
+    `Цена ${f(w.price)}, ${pdName(w.side)}`,
+    ...entryLines(a.retest, f),
+    ...(poi ? [`Внутри старшей зоны ${poi.tfl} ${poi.type} ${f(poi.lo)}–${f(poi.hi)}`] : []),
+    ...planLines(a, f),
     `Данные: ${source}. Проверь реакцию на графике:`,
     `${SITE}?s=${w.sym}`,
   ].join("\n"));
   seen[key] = Date.now();
 }
 
-for (const d of daily) {
-  const key = `daily:${d.sym}:${d.x.name}:${d.x.v}`;
-  if (seen[key]) continue;
-  await send([
-    `🟠 Дневной свип. ${d.sym}: снят ${d.x.name} ${fmt(d.x.v, d.price)}`,
-    `Цена ${fmt(d.price, d.price)}`,
-    `Возможен разворот ${d.x.side === "ssl" ? "вверх" : "вниз"}, ждём Shift на m15`,
-    `Данные: ${source}. Это не сигнал на вход, сверь график:`,
-    `${SITE}?s=${d.sym}`,
-  ].join("\n"), true);
-  seen[key] = Date.now();
-}
-
-for (const e of early) {
-  const key = `early:${e.sym}:${e.side}:${e.s.sweep.t}`;
-  if (seen[key]) continue;
-  const f = v => fmt(v, e.price), { s } = e;
-  await send([
-    `🔵 Ранний сигнал. ${e.sym}: Shift ${e.side === "long" ? "вверх" : "вниз"} после свипа`,
-    `Свип ${s.sweep.name} ${f(s.sweep.v)}`,
-    `Shift через ${f(s.shift.v)}`,
-    `Цена ${f(e.price)}`,
-    ...entryLines(s.retest, f),
-    `Стоп-лосс ${f(s.stop)}`,
-    `Тейк-профит 3R ${f(s.tp3)}`,
-    s.target && s.rr !== null ? `${s.rr.toFixed(1)}R до ${f(s.target.v)}` : "Цели рядом нет",
-    `Условий курса ${s.passed} из 9${s.missing.length ? `. Нет: ${s.missing.join(", ")}` : ""}`,
-    `Данные: ${source}. Это не сигнал на вход, сверь график:`,
-    `${SITE}?s=${e.sym}`,
-  ].join("\n"), true);
-  seen[key] = Date.now();
-}
-
 for (const h of hits) {
-  const key = `${h.sym}:${h.side}:${h.sweepT}`;
+  const { a } = h, key = `shift:${h.sym}:${h.side}:${a.shift.t}`;
   if (seen[key]) continue;
+  const f = v => fmt(v, h.price);
   await send([
-    `🟢 ${h.sym}: условия ${h.side === "long" ? "лонга" : "шорта"} собраны`,
-    `Цена ${fmt(h.price, h.price)}`,
-    ...entryLines(h.retest, v => fmt(v, h.price)),
-    `${h.rr.toFixed(1)}R до ${fmt(h.target, h.price)}`,
-    `Стоп-лосс ${fmt(h.stop, h.price)}`,
-    `Тейк-профит 3R ${fmt(h.tp3, h.price)}`,
-    `Данные: ${source}`,
-    `Это проверка условий, а не сигнал. Сверь график:`,
+    `🟢 ${h.sym}: Shift ${h.side === "long" ? "вверх" : "вниз"} после свипа ${a.sweep.name}`,
+    `Свип ${f(a.sweep.v)}, Shift через ${f(a.shift.v)}`,
+    `Цена ${f(h.price)}, ${pdName(h.side)}`,
+    ...entryLines(a.retest, f),
+    ...planLines(a, f),
+    `Данные: ${source}. Это не сигнал на вход, сверь график:`,
     `${SITE}?s=${h.sym}`,
   ].join("\n"));
   seen[key] = Date.now();
