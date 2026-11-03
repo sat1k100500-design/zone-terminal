@@ -1,0 +1,40 @@
+name: Сканер сетапов
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+    inputs:
+      test:
+        description: Отправить пробное сообщение
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scan
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Восстановить уже отправленные сетапы
+        uses: actions/cache@v4
+        with:
+          path: scan_state.json
+          key: scan-state-${{ github.run_id }}
+          restore-keys: scan-state-
+      - name: Проверить монеты
+        run: node scanner.mjs
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SCAN_TEST: ${{ inputs.test }}
