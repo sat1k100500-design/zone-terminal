@@ -54,6 +54,15 @@ async function send(text) {
   throw new Error(`Telegram не принял сообщение: ${problem}`);
 }
 
+function entryLines(r, f) {
+  if (!r) return ["Зоны входа после Shift нет"];
+  const out = [];
+  if (r.ob) out.push(`Вход OB ${f(r.ob.open)}, 50% ${f(r.ob.mid)}`);
+  if (r.fvg) out.push(`Вход FVG ${f(r.fvg.edge)}, 50% ${f(r.fvg.mid)}`);
+  if (r.touched) out.push("Цена уже заходила в зону");
+  return out;
+}
+
 const { api, source, list } = await coinList();
 if (TEST === "true") await send(`Проверка связи. Сканер работает, данные: ${source}.`);
 
@@ -71,7 +80,7 @@ await Promise.all(Array.from({ length: WORKERS }, async () => {
       const m = buildModel(data, "15m", { lo: null, hi: null });
       for (const side of ["long", "short"]) {
         const s = m.setup[side];
-        if (s.ok) hits.push({ sym, side, rr: s.rr, stop: s.stop, target: s.target.v, price: m.price, sweepT: s.sweep.t });
+        if (s.ok) hits.push({ sym, side, rr: s.rr, stop: s.stop, target: s.target.v, price: m.price, sweepT: s.sweep.t, retest: s.retest });
         if (s.early) early.push({ sym, side, s, price: m.price });
       }
     } catch (e) { failed++; console.log(`${sym}: ${e.message}`); }
@@ -89,9 +98,10 @@ for (const e of early) {
     `Свип ${s.sweep.name} ${f(s.sweep.v)}`,
     `Shift через ${f(s.shift.v)}`,
     `Цена ${f(e.price)}`,
+    ...entryLines(s.retest, f),
     `Стоп-лосс ${f(s.stop)}`,
     s.target && s.rr !== null ? `${s.rr.toFixed(1)}R до ${f(s.target.v)}` : "Цели рядом нет",
-    `Условий курса ${s.passed} из 6${s.missing.length ? `. Нет: ${s.missing.join(", ")}` : ""}`,
+    `Условий курса ${s.passed} из 7${s.missing.length ? `. Нет: ${s.missing.join(", ")}` : ""}`,
     `Данные: ${source}. Это не сигнал на вход, сверь график:`,
     `${SITE}?s=${e.sym}`,
   ].join("\n"));
@@ -104,6 +114,7 @@ for (const h of hits) {
   await send([
     `${h.sym}: условия ${h.side === "long" ? "лонга" : "шорта"} собраны`,
     `Цена ${fmt(h.price, h.price)}`,
+    ...entryLines(h.retest, v => fmt(v, h.price)),
     `${h.rr.toFixed(1)}R до ${fmt(h.target, h.price)}`,
     `Стоп-лосс ${fmt(h.stop, h.price)}`,
     `Данные: ${source}`,
