@@ -35,14 +35,15 @@ async function candles(api, sym, tf) {
   const rows = await json(`${api}/klines?symbol=${sym}&interval=${tf}&limit=${LOADS[tf]}`);
   return rows.map(x => ({ t: x[0] / 1000, o: +x[1], h: +x[2], l: +x[3], c: +x[4] }));
 }
-async function send(text) {
-  if (!TOKEN || !CHAT) { console.log("[без отправки]\n" + text); return; }
+/* silent: сообщение придёт без звука. Со звуком идут только 🟣 и 🟢. */
+async function send(text, silent = false) {
+  if (!TOKEN || !CHAT) { console.log(`[без отправки${silent ? ", тихо" : ""}]\n` + text); return; }
   let problem = "";
   for (let attempt = 1; attempt <= 4; attempt++) {
     try {
       const r = await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
         method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(20000),
-        body: JSON.stringify({ chat_id: CHAT, text, disable_web_page_preview: true }),
+        body: JSON.stringify({ chat_id: CHAT, text, disable_web_page_preview: true, disable_notification: silent }),
       });
       if (r.ok) return;
       problem = `ответ ${r.status}`;
@@ -69,7 +70,7 @@ if (TEST === "true") await send(`Проверка связи. Сканер ра�
 let seen = {};
 if (existsSync(STATE)) try { seen = JSON.parse(readFileSync(STATE, "utf8")); } catch (e) { seen = {}; }
 
-const hits = [], early = [], daily = [];
+const hits = [], early = [], daily = [], retest = [];
 let next = 0, failed = 0;
 await Promise.all(Array.from({ length: WORKERS }, async () => {
   while (next < list.length) {
@@ -83,12 +84,32 @@ await Promise.all(Array.from({ length: WORKERS }, async () => {
         const s = m.setup[side];
         if (s.ok) hits.push({ sym, side, rr: s.rr, stop: s.stop, target: s.target.v, price: m.price, sweepT: s.sweep.t, retest: s.retest });
         if (s.early) early.push({ sym, side, s, price: m.price });
+        if (s.watch) retest.push({ sym, side, s, price: m.price });
       }
     } catch (e) { failed++; console.log(`${sym}: ${e.message}`); }
   }
 }));
-console.log(`Источник ${source}. Проверено ${list.length - failed} из ${list.length}, сетапов ${hits.length}, ранних сигналов ${early.length}, дневных свипов ${daily.length}.`);
+console.log(`Источник ${source}. Проверено ${list.length - failed} из ${list.length}, сетапов ${hits.length}, ранних сигналов ${early.length}, дневных свипов ${daily.length}, ждут возврата ${retest.length}.`);
 if (failed === list.length) throw new Error("Не удалось получить данные ни по одной монете");
+
+for (const w of retest) {
+  const { s } = w, dir = w.side === "long" ? 1 : -1, entry = s.retest.entry, gap = dir * (w.price - entry), risk = Math.abs(entry - s.stop);
+  const phase = gap <= 0 ? "zone" : gap <= risk * .5 ? "near" : null;
+  if (!phase || (s.target && dir * (w.price - s.target.v) >= 0)) continue;
+  const key = `retest:${w.sym}:${w.side}:${s.sweep.t}:${phase}`;
+  if (seen[key]) continue;
+  const f = v => fmt(v, w.price);
+  await send([
+    `🟣 ${w.sym}: цена ${phase === "zone" ? "В ЗОНЕ" : "подходит к зоне"} ${s.retest.name}, ${w.side === "long" ? "лонг" : "шорт"}`,
+    `Цена ${f(w.price)}`,
+    ...entryLines(s.retest, f),
+    `Стоп-лосс ${f(s.stop)}`,
+    s.target && s.rr !== null ? `${s.rr.toFixed(1)}R до ${f(s.target.v)}` : "Цели рядом нет",
+    `Данные: ${source}. Проверь реакцию на графике:`,
+    `${SITE}?s=${w.sym}`,
+  ].join("\n"));
+  seen[key] = Date.now();
+}
 
 for (const d of daily) {
   const key = `daily:${d.sym}:${d.x.name}:${d.x.v}`;
@@ -99,7 +120,7 @@ for (const d of daily) {
     `Возможен разворот ${d.x.side === "ssl" ? "вверх" : "вниз"}, ждём Shift на m15`,
     `Данные: ${source}. Это не сигнал на вход, сверь график:`,
     `${SITE}?s=${d.sym}`,
-  ].join("\n"));
+  ].join("\n"), true);
   seen[key] = Date.now();
 }
 
@@ -118,7 +139,7 @@ for (const e of early) {
     `Условий курса ${s.passed} из 9${s.missing.length ? `. Нет: ${s.missing.join(", ")}` : ""}`,
     `Данные: ${source}. Это не сигнал на вход, сверь график:`,
     `${SITE}?s=${e.sym}`,
-  ].join("\n"));
+  ].join("\n"), true);
   seen[key] = Date.now();
 }
 
