@@ -37,11 +37,21 @@ async function candles(api, sym, tf) {
 }
 async function send(text) {
   if (!TOKEN || !CHAT) { console.log("[без отправки]\n" + text); return; }
-  const r = await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ chat_id: CHAT, text, disable_web_page_preview: true }),
-  });
-  if (!r.ok) throw new Error(`Telegram ответил ${r.status}: ${(await r.json()).description || ""}`);
+  let problem = "";
+  for (let attempt = 1; attempt <= 4; attempt++) {
+    try {
+      const r = await fetch(`https://api.telegram.org/bot${TOKEN}/sendMessage`, {
+        method: "POST", headers: { "content-type": "application/json" }, signal: AbortSignal.timeout(20000),
+        body: JSON.stringify({ chat_id: CHAT, text, disable_web_page_preview: true }),
+      });
+      if (r.ok) return;
+      problem = `ответ ${r.status}`;
+      if (r.status >= 400 && r.status < 500 && r.status !== 429) break; // неверный токен или чат: повтор не поможет
+    } catch (e) { problem = e.name; }
+    console.log(`Telegram: ${problem}, попытка ${attempt}`);
+    await new Promise(done => setTimeout(done, attempt * 5000));
+  }
+  throw new Error(`Telegram не принял сообщение: ${problem}`);
 }
 
 const { api, source, list } = await coinList();
