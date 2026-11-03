@@ -69,7 +69,7 @@ if (TEST === "true") await send(`Проверка связи. Сканер ра�
 let seen = {};
 if (existsSync(STATE)) try { seen = JSON.parse(readFileSync(STATE, "utf8")); } catch (e) { seen = {}; }
 
-const hits = [], early = [];
+const hits = [], early = [], daily = [];
 let next = 0, failed = 0;
 await Promise.all(Array.from({ length: WORKERS }, async () => {
   while (next < list.length) {
@@ -78,6 +78,7 @@ await Promise.all(Array.from({ length: WORKERS }, async () => {
       const data = {};
       for (const tf of Object.keys(LOADS)) data[tf] = await candles(api, sym, tf);
       const m = buildModel(data, "15m", { lo: null, hi: null });
+      for (const x of m.setup.freshDaily) daily.push({ sym, x, price: m.price });
       for (const side of ["long", "short"]) {
         const s = m.setup[side];
         if (s.ok) hits.push({ sym, side, rr: s.rr, stop: s.stop, target: s.target.v, price: m.price, sweepT: s.sweep.t, retest: s.retest });
@@ -86,15 +87,28 @@ await Promise.all(Array.from({ length: WORKERS }, async () => {
     } catch (e) { failed++; console.log(`${sym}: ${e.message}`); }
   }
 }));
-console.log(`Источник ${source}. Проверено ${list.length - failed} из ${list.length}, сетапов ${hits.length}, ранних сигналов ${early.length}.`);
+console.log(`Источник ${source}. Проверено ${list.length - failed} из ${list.length}, сетапов ${hits.length}, ранних сигналов ${early.length}, дневных свипов ${daily.length}.`);
 if (failed === list.length) throw new Error("Не удалось получить данные ни по одной монете");
+
+for (const d of daily) {
+  const key = `daily:${d.sym}:${d.x.name}:${d.x.v}`;
+  if (seen[key]) continue;
+  await send([
+    `🟠 Дневной свип. ${d.sym}: снят ${d.x.name} ${fmt(d.x.v, d.price)}`,
+    `Цена ${fmt(d.price, d.price)}`,
+    `Возможен разворот ${d.x.side === "ssl" ? "вверх" : "вниз"}, ждём Shift на m15`,
+    `Данные: ${source}. Это не сигнал на вход, сверь график:`,
+    `${SITE}?s=${d.sym}`,
+  ].join("\n"));
+  seen[key] = Date.now();
+}
 
 for (const e of early) {
   const key = `early:${e.sym}:${e.side}:${e.s.sweep.t}`;
   if (seen[key]) continue;
   const f = v => fmt(v, e.price), { s } = e;
   await send([
-    `Ранний сигнал. ${e.sym}: Shift ${e.side === "long" ? "вверх" : "вниз"} после свипа`,
+    `🔵 Ранний сигнал. ${e.sym}: Shift ${e.side === "long" ? "вверх" : "вниз"} после свипа`,
     `Свип ${s.sweep.name} ${f(s.sweep.v)}`,
     `Shift через ${f(s.shift.v)}`,
     `Цена ${f(e.price)}`,
@@ -112,7 +126,7 @@ for (const h of hits) {
   const key = `${h.sym}:${h.side}:${h.sweepT}`;
   if (seen[key]) continue;
   await send([
-    `${h.sym}: условия ${h.side === "long" ? "лонга" : "шорта"} собраны`,
+    `🟢 ${h.sym}: условия ${h.side === "long" ? "лонга" : "шорта"} собраны`,
     `Цена ${fmt(h.price, h.price)}`,
     ...entryLines(h.retest, v => fmt(v, h.price)),
     `${h.rr.toFixed(1)}R до ${fmt(h.target, h.price)}`,
