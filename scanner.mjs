@@ -82,7 +82,7 @@ await Promise.all(Array.from({ length: WORKERS }, async () => {
       for (const x of m.setup.freshDaily) daily.push({ sym, x, price: m.price });
       for (const side of ["long", "short"]) {
         const s = m.setup[side];
-        if (s.ok) hits.push({ sym, side, rr: s.rr, stop: s.stop, target: s.target.v, price: m.price, sweepT: s.sweep.t, retest: s.retest });
+        if (s.ok) hits.push({ sym, side, rr: s.rr, stop: s.stop, tp3: s.tp3, target: s.target.v, price: m.price, sweepT: s.sweep.t, retest: s.retest });
         if (s.early) early.push({ sym, side, s, price: m.price });
         if (s.watch) retest.push({ sym, side, s, price: m.price });
       }
@@ -104,6 +104,7 @@ for (const w of retest) {
     `Цена ${f(w.price)}`,
     ...entryLines(s.retest, f),
     `Стоп-лосс ${f(s.stop)}`,
+    `Тейк-профит 3R ${f(s.tp3)}`,
     s.target && s.rr !== null ? `${s.rr.toFixed(1)}R до ${f(s.target.v)}` : "Цели рядом нет",
     `Данные: ${source}. Проверь реакцию на графике:`,
     `${SITE}?s=${w.sym}`,
@@ -135,6 +136,7 @@ for (const e of early) {
     `Цена ${f(e.price)}`,
     ...entryLines(s.retest, f),
     `Стоп-лосс ${f(s.stop)}`,
+    `Тейк-профит 3R ${f(s.tp3)}`,
     s.target && s.rr !== null ? `${s.rr.toFixed(1)}R до ${f(s.target.v)}` : "Цели рядом нет",
     `Условий курса ${s.passed} из 9${s.missing.length ? `. Нет: ${s.missing.join(", ")}` : ""}`,
     `Данные: ${source}. Это не сигнал на вход, сверь график:`,
@@ -152,6 +154,7 @@ for (const h of hits) {
     ...entryLines(h.retest, v => fmt(v, h.price)),
     `${h.rr.toFixed(1)}R до ${fmt(h.target, h.price)}`,
     `Стоп-лосс ${fmt(h.stop, h.price)}`,
+    `Тейк-профит 3R ${fmt(h.tp3, h.price)}`,
     `Данные: ${source}`,
     `Это проверка условий, а не сигнал. Сверь график:`,
     `${SITE}?s=${h.sym}`,
