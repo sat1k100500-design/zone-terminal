@@ -60,7 +60,7 @@ if (TEST === "true") await send(`Проверка связи. Сканер ра�
 let seen = {};
 if (existsSync(STATE)) try { seen = JSON.parse(readFileSync(STATE, "utf8")); } catch (e) { seen = {}; }
 
-const hits = [];
+const hits = [], early = [];
 let next = 0, failed = 0;
 await Promise.all(Array.from({ length: WORKERS }, async () => {
   while (next < list.length) {
@@ -72,12 +72,31 @@ await Promise.all(Array.from({ length: WORKERS }, async () => {
       for (const side of ["long", "short"]) {
         const s = m.setup[side];
         if (s.ok) hits.push({ sym, side, rr: s.rr, stop: s.stop, target: s.target.v, price: m.price, sweepT: s.sweep.t });
+        if (s.early) early.push({ sym, side, s, price: m.price });
       }
     } catch (e) { failed++; console.log(`${sym}: ${e.message}`); }
   }
 }));
-console.log(`Источник ${source}. Проверено ${list.length - failed} из ${list.length}, сетапов ${hits.length}.`);
+console.log(`Источник ${source}. Проверено ${list.length - failed} из ${list.length}, сетапов ${hits.length}, ранних сигналов ${early.length}.`);
 if (failed === list.length) throw new Error("Не удалось получить данные ни по одной монете");
+
+for (const e of early) {
+  const key = `early:${e.sym}:${e.side}:${e.s.sweep.t}`;
+  if (seen[key]) continue;
+  const f = v => fmt(v, e.price), { s } = e;
+  await send([
+    `Ранний сигнал. ${e.sym}: Shift ${e.side === "long" ? "вверх" : "вниз"} после свипа`,
+    `Свип ${s.sweep.name} ${f(s.sweep.v)}`,
+    `Shift через ${f(s.shift.v)}`,
+    `Цена ${f(e.price)}`,
+    `Стоп-лосс ${f(s.stop)}`,
+    s.target && s.rr !== null ? `${s.rr.toFixed(1)}R до ${f(s.target.v)}` : "Цели рядом нет",
+    `Условий курса ${s.passed} из 6${s.missing.length ? `. Нет: ${s.missing.join(", ")}` : ""}`,
+    `Данные: ${source}. Это не сигнал на вход, сверь график:`,
+    `${SITE}?s=${e.sym}`,
+  ].join("\n"));
+  seen[key] = Date.now();
+}
 
 for (const h of hits) {
   const key = `${h.sym}:${h.side}:${h.sweepT}`;
