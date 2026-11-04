@@ -3,6 +3,7 @@
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 import vm from "node:vm";
 
+const FUTURES = new URL("./futures.json", import.meta.url);
 const COINS = 50, WORKERS = 3, STATE = "scan_state.json", SITE = "https://sat1k100500-design.github.io/zone-terminal/";
 const LOADS = { "1d": 150, "4h": 300, "1h": 300, "15m": 300 };
 const { TELEGRAM_BOT_TOKEN: TOKEN, TELEGRAM_CHAT_ID: CHAT, SCAN_TEST: TEST } = process.env;
@@ -28,7 +29,13 @@ async function coinList() {
     console.log(`Фьючерсы недоступны (${e.message}), считаю по споту`);
     const stable = /^(USDC|FDUSD|TUSD|USDP|DAI|BUSD|USDE|RLUSD|USD1|EUR|U)USDT$/;
     const ticks = await json(`${SPOT}/ticker/24hr`);
-    return { api: SPOT, source: "Binance Spot", list: ticks.filter(t => t.symbol.endsWith("USDT") && !stable.test(t.symbol)).sort((a, b) => b.quoteVolume - a.quoteVolume).slice(0, COINS).map(t => t.symbol) };
+    /* На споте есть монеты без фьючерсов, например токены акций: терминал их не откроет, поэтому берём только те, что есть в списке фьючерсов. Из облака фьючерсы недоступны, список лежит в futures.json. */
+    const known = new Set(existsSync(FUTURES) ? JSON.parse(readFileSync(FUTURES, "utf8")).symbols : []);
+    const spot = ticks.filter(t => t.symbol.endsWith("USDT") && !stable.test(t.symbol)).sort((a, b) => b.quoteVolume - a.quoteVolume);
+    const usable = known.size ? spot.filter(t => known.has(t.symbol)) : spot;
+    const skipped = spot.slice(0, COINS).filter(t => known.size && !known.has(t.symbol)).map(t => t.symbol);
+    console.log(`Список фьючерсов: ${known.size}. Убрано из верхних ${COINS} спота: ${skipped.join(", ") || "ничего"}`);
+    return { api: SPOT, source: "Binance Spot", list: usable.slice(0, COINS).map(t => t.symbol) };
   }
 }
 async function candles(api, sym, tf) {
