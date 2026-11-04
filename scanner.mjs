@@ -107,7 +107,7 @@ await Promise.all(Array.from({ length: WORKERS }, async () => {
         const a = m.setup[side].alert;
         if (!a) continue;
         if (a.age <= FRESH && inBand(a, m.price)) hits.push({ sym, side, a, price: m.price });
-        if (a.retest && a.age <= RETURN) retest.push({ sym, side, a, price: m.price });
+        if (a.retest && !a.retest.passed && a.age <= RETURN) retest.push({ sym, side, a, price: m.price });
       }
     } catch (e) { failed++; console.log(`${sym}: ${e.message}`); }
   }
