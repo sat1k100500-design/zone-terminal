@@ -35,7 +35,7 @@ async function candles(api, sym, tf) {
   const rows = await json(`${api}/klines?symbol=${sym}&interval=${tf}&limit=${LOADS[tf]}`);
   return rows.map(x => ({ t: x[0] / 1000, o: +x[1], h: +x[2], l: +x[3], c: +x[4] }));
 }
-/* silent: сообщение придёт без звука. Так идут только 🟡. */
+/* silent: сообщение придёт без звука. */
 async function send(text, silent = false) {
   if (!TOKEN || !CHAT) { console.log(`[без отправки${silent ? ", тихо" : ""}]\n` + text); return; }
   let problem = "";
@@ -79,7 +79,7 @@ if (TEST === "true") await send(`Проверка связи. Сканер ра�
 let seen = {};
 if (existsSync(STATE)) try { seen = JSON.parse(readFileSync(STATE, "utf8")); } catch (e) { seen = {}; }
 
-const hits = [], retest = [], ranges = [];
+const hits = [], retest = [];
 let next = 0, failed = 0;
 await Promise.all(Array.from({ length: WORKERS }, async () => {
   while (next < list.length) {
@@ -88,7 +88,6 @@ await Promise.all(Array.from({ length: WORKERS }, async () => {
       const data = {};
       for (const tf of Object.keys(LOADS)) data[tf] = await candles(api, sym, tf);
       const m = buildModel(data, "15m", { lo: null, hi: null });
-      if (m.range4h) ranges.push({ sym, R: m.range4h, price: m.price });
       for (const side of ["long", "short"]) {
         const a = m.setup[side].alert;
         if (!a) continue;
@@ -132,22 +131,6 @@ for (const h of hits) {
     `Данные: ${source}. Это не сигнал на вход, сверь график:`,
     `${SITE}?s=${h.sym}`,
   ].join("\n"));
-  seen[key] = Date.now();
-}
-for (const { sym, R, price } of ranges) for (const side of ["up", "dn"]) {
-  const e = R.exits[side], up = side === "up";
-  if (e.t === null || e.age > FRESH) continue;
-  const key = `range:${sym}:${side}:${up ? R.hi : R.lo}:${Math.floor(e.t / 14400)}`;
-  if (seen[key]) continue;
-  const f = v => fmt(v, price);
-  await send([
-    `🟡 ${sym}: ${e.n > 1 ? `повторный выход, №${e.n},` : "выход"} за ${up ? "верх" : "низ"} ренджа 4H`,
-    `Граница ${f(up ? R.hi : R.lo)}, другая граница ${f(up ? R.lo : R.hi)}`,
-    `Цена ${f(price)}`,
-    `Закрытие 4H за границей закончит рендж, возврат внутрь будет снятием.`,
-    `Данные: ${source}. Это не сигнал на вход, сверь график:`,
-    `${SITE}?s=${sym}`,
-  ].join("\n"), true);
   seen[key] = Date.now();
 }
 const week = Date.now() - 7 * 864e5;
