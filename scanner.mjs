@@ -8,6 +8,14 @@ const COINS = 50, WORKERS = 3, STATE = "scan_state.json", SITE = "https://sat1k1
 const LOADS = { "1d": 150, "4h": 300, "1h": 300, "15m": 300 };
 const { TELEGRAM_BOT_TOKEN: TOKEN, TELEGRAM_CHAT_ID: CHAT, SCAN_TEST: TEST } = process.env;
 
+/* Пока работает сканер на компьютере, облако молчит: сообщения идут от компьютера по данным фьючерсов. Сигнал старше 40 минут значит, что компьютер выключен или сканер остановился. */
+const QUIET = 2400, beat = +process.env.PC_HEARTBEAT || 0, beatAge = Math.floor(Date.now() / 1000) - beat;
+if (TEST !== "true" && beat && beatAge < QUIET) {
+  console.log(`Сканер на компьютере работает (сигнал ${Math.round(beatAge / 60)} мин назад), облако молчит.`);
+  process.exit(0);
+}
+console.log(beat ? `Сигнала от компьютера нет ${Math.round(beatAge / 60)} мин, облако работает.` : "Сигнала от компьютера ещё не было, облако работает.");
+
 const html = readFileSync(new URL("./index.html", import.meta.url), "utf8");
 const from = html.indexOf("/* ---------- Правила курса ---------- */"), to = html.indexOf("/* ---------- Данные ---------- */");
 if (from < 0 || to < 0) throw new Error("Не найден блок правил в index.html");
