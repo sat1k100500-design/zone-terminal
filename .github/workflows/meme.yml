@@ -1,0 +1,40 @@
+name: Сканер мемов
+
+on:
+  schedule:
+    - cron: "7,37 * * * *"
+  workflow_dispatch:
+    inputs:
+      test:
+        description: Отправить пробное сообщение
+        type: boolean
+        default: false
+
+permissions:
+  contents: read
+
+concurrency:
+  group: meme
+  cancel-in-progress: false
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Восстановить уже отправленные токены
+        uses: actions/cache@v4
+        with:
+          path: meme_state.json
+          key: meme-state-${{ github.run_id }}
+          restore-keys: meme-state-
+      - name: Проверить мемы после слива
+        run: node meme_scanner.mjs
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          SCAN_TEST: ${{ inputs.test }}
