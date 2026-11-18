@@ -4,7 +4,7 @@
 // Проверка ликвидности: RugCheck для Solana, GoPlus для Base и BSC; показываем только с блокировкой от 90% и без опасных рисков.
 import { readFileSync, writeFileSync, existsSync } from "node:fs";
 
-const NETS = (process.env.MEME_NETS || "solana,base,bsc").split(","), STATE = "meme_state.json";
+const NETS = (process.env.MEME_NETS || "solana").split(","), STATE = "meme_state.json";
 const SITE = "https://sat1k100500-design.github.io/zone-terminal/";
 const F = { cap: 3e6, liq: 1e4, drop: 70, volx: 1.5 }, MIN_LOCK = 90, REPEAT_H = 48;
 const { TELEGRAM_BOT_TOKEN: TOKEN, TELEGRAM_CHAT_ID: CHAT, SCAN_TEST: TEST, DRY_RUN: DRY } = process.env;
